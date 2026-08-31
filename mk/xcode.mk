@@ -90,6 +90,6 @@ xcode:
 	@ditto "${APP_SOURCE}" "${APP}"
 	@${CODESIGN} --force --deep -s "${SIGN_IDENTITY}" "${APP}" \
 		&& ${ECHO} "   signed: ${APP}" || { ${ECHO} "   codesign FAILED"; exit 1; }
-	@${ECHO} "   identity: ${SIGN_IDENTITY} (ad-hoc)"
+	@${ECHO} "   signing complete (identity not printed)"
 	@${ECHO} "   verify:  ${CODESIGN} --verify --deep --strict ${APP}"
 	@${CODESIGN} --verify --deep --strict "${APP}" && ${ECHO} "   verify: OK" || true
