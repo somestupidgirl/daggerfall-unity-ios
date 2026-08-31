@@ -43,14 +43,12 @@ UNITY?=		${UNITY_DIR}/Unity.app/Contents/MacOS/Unity
 #                  Team" failure entirely and yields a .ipa that sideloads
 #                  on a dev/trusted device.
 #
-#   For a proper store/device install later, set a real Development cert by
-#   fingerprint and add the account to Xcode -> Settings -> Accounts:
-#       bmake SIGN_IDENTITY=09B795DABD40E2B0A28930BA25AFE018FBD6CF96 \
-#             DEVELOPMENT_TEAM=82PYZFRKJC
+#   For a proper store/device install, provide a local Development identity
+#   and team ID at invocation time or through an untracked local makefile:
+#       bmake SIGN_IDENTITY=<local-identity> DEVELOPMENT_TEAM=<local-team-id>
 #
-#   security find-identity -v -p codesigning
-#       ) 09B795DABD40E2B0A28930BA25AFE018FBD6CF96
-#         "Apple Development: sunnevanattsol@gmail.com (82PYZFRKJC)"
+#   Find local identities with:
+#       security find-identity -v -p codesigning
 PRODUCT_NAME=	DaggerfallUnity
 BUNDLE_ID=	net.codex64.daggerfall
 SIGN_IDENTITY?=	-
