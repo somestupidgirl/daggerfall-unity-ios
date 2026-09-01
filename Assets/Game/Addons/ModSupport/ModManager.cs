@@ -682,6 +682,7 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
                 }
 
                 Mod mod = mods[index];
+                InterpretedModRuntime.Unload(mod);
                 if (mod.AssetBundle)
                     mod.AssetBundle.Unload(unloadAllAssets);
 
@@ -718,8 +719,11 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
                     continue;
                 }
                 Debug.Log("ModManager - started loading mod: " + mod.Title);
-                mod.CompileSourceToAssemblies();
+                if (!InterpretedModRuntime.HasBehavior(mod))
+                    mod.CompileSourceToAssemblies();
+                InterpretedModRuntime.Load(mod);
             }
+            InterpretedModRuntime.Dispatch("start");
             Debug.Log("ModManager - init finished.  Mod Count: " + LoadedModCount);
         }
 

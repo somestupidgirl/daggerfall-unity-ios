@@ -10,6 +10,7 @@
 //
 
 using DaggerfallWorkshop.Game.Serialization;
+using DaggerfallWorkshop.Game.Utility.ModSupport;
 using DaggerfallWorkshop.Game.Weather;
 using DaggerfallWorkshop.Utility;
 using UnityEngine;
@@ -566,6 +567,7 @@ namespace DaggerfallWorkshop.Game
 
         static void RaiseOnWeatherChangeEvent(WeatherType weather)
         {
+            InterpretedModRuntime.Dispatch("weather.changed", weather);
             if (OnWeatherChange != null)
                 OnWeatherChange(weather);
         }

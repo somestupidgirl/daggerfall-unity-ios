@@ -17,6 +17,7 @@ using DaggerfallWorkshop.Utility;
 using Unity.Collections;
 using Unity.Jobs;
 using System.Collections.Generic;
+using DaggerfallWorkshop.Game.Utility.ModSupport;
 
 namespace DaggerfallWorkshop
 {
@@ -394,6 +395,7 @@ namespace DaggerfallWorkshop
         public static event OnPromoteTerrainDataEventHandler OnPromoteTerrainData;
         protected virtual void RaiseOnPromoteTerrainDataEvent(TerrainData terrainData)
         {
+            InterpretedModRuntime.Dispatch("terrain.promoted", terrainData);
             if (OnPromoteTerrainData != null)
                 OnPromoteTerrainData(this, terrainData);
         }
