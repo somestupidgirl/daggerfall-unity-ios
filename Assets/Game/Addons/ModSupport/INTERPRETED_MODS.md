@@ -26,8 +26,14 @@ The runtime currently dispatches `start`, `terrain.promoted`, and
 part of the generic app capability surface; mod-specific behavior remains in
 the external behavior file.
 
+The built-in terrain capability provides `terrain.details.apply`, whose single
+argument is the name of a `TerrainDetailSet` JSON asset in the same bundle, and
+`terrain.details.clear`. A set describes prototype assets and optional density
+layers without requiring executable code.
+
 Operations receive the owning `Mod`, string arguments, and the event context.
-Terrain events provide `TerrainData`; weather events provide `WeatherType`.
+Terrain events provide `InterpretedTerrainContext`; weather events provide
+`WeatherType`.
 Implementations must validate arguments and remain on the main Unity thread.
 
 Legacy `.cs.txt` and `.dll.bytes` assets continue to use the desktop runtime

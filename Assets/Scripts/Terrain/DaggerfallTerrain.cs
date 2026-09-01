@@ -395,7 +395,11 @@ namespace DaggerfallWorkshop
         public static event OnPromoteTerrainDataEventHandler OnPromoteTerrainData;
         protected virtual void RaiseOnPromoteTerrainDataEvent(TerrainData terrainData)
         {
-            InterpretedModRuntime.Dispatch("terrain.promoted", terrainData);
+            InterpretedModRuntime.Dispatch("terrain.promoted", new InterpretedTerrainContext(
+                this,
+                terrainData,
+                MapData.worldClimate,
+                TileMap));
             if (OnPromoteTerrainData != null)
                 OnPromoteTerrainData(this, terrainData);
         }
