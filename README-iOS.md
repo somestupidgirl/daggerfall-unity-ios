@@ -71,6 +71,31 @@ suppressing camera look mid-swing, which it already did for PC players.
 `Tools > Daggerfall Mobile > Run Self Test` verifies the input logic headlessly
 (31 checks) and exits non-zero on failure.
 
+## Installing the app
+
+Two routes. Either way the `.ipa` is unsigned and gets signed on the spot with **your own
+Apple ID**; a free Apple ID's signature lasts 7 days, and both stores below re-sign for you
+before it runs out.
+
+**SideStore or AltStore source (recommended).** Add this source once and the store shows
+every pre-alpha from 0.1.9 on, installs with one tap, and offers each new release as an
+in-app update. Tap the link for the store you use, or paste the feed URL into its
+Sources tab:
+
+- SideStore: `sidestore://source?url=https://codex64ai.github.io/daggerfall-unity-ios/altstore.json`
+- AltStore: `altstore://source?url=https://codex64ai.github.io/daggerfall-unity-ios/altstore.json`
+- Feed URL: <https://codex64ai.github.io/daggerfall-unity-ios/altstore.json>
+
+SideStore refreshes on the device itself (set it up once from a Windows PC or Mac with
+its `iloader` installer, then keep its LocalDevVPN app connected). AltStore refreshes only
+while AltServer is running on a computer on the same Wi-Fi. Both are limited by Apple to
+three sideloaded apps at a time on a free Apple ID.
+
+**Xcode or Sideloadly.** Download the `.ipa` from the
+[releases page](https://github.com/Codex64ai/daggerfall-unity-ios/releases), or build it
+yourself as above, and install it with Xcode or Sideloadly. You re-sign by hand every 7
+days.
+
 ## Installing game data on the device
 
 The app ships without game data because Daggerfall's assets remain Bethesda's copyright,
@@ -427,6 +452,22 @@ Two iOS-specific rules:
   replacements are not covered by the headless builder, which does not run the GUI Mod
   Builder's prefab serialization pass.
 
+### The MIT mod pack
+
+Ten of Cliffworms' MIT-licensed mods are built for iOS and published with each release as
+`MIT-ModPack-ios.zip`. Install any or all of them like any other mod: copy the `.dfmod` files you
+want into `Documents/Mods` with the Files app and restart. Each appears in the launcher's MODS
+window, switched on; untick to switch off.
+
+- **World:** Fixed Dungeon Exteriors, Varied Wealthy Homes, Smaller Main Quest Dungeons,
+  Aquatic Sprites.
+- **Quests:** Leveling Inspiration, Skyrim's Adventures, Jobs of the Thieves Guild, Arena's
+  Adventures, Town Greetings of the Iliac Bay, Rumors of the Iliac Bay.
+
+Authors, licences and pinned versions are in `THIRD-PARTY.md`; the licence texts are in the zip.
+A build can also carry these inside the app (`StreamingAssets/Mods`); if it does, a copy you
+install yourself in `Documents/Mods` takes precedence.
+
 ### Converting a desktop `.dfmod`
 
 One mod per run, from a checkout of this fork with the Unity editor installed:
@@ -674,7 +715,9 @@ plain text and safe to delete.
   destination across open water is walked toward in a straight line, over the water. For
   overseas trips, use classic fast travel (switch Real travel off for that trip, or travel
   recklessly and expect wet feet).
-- **Free Apple ID signing expires after 7 days**, after which you re-sign and redeploy.
+- **Free Apple ID signing expires after 7 days.** SideStore and AltStore re-sign
+  automatically (see [Installing the app](#installing-the-app)); with Xcode or
+  Sideloadly you re-sign and redeploy by hand.
 - iPad has no vibration motor, so haptics are a deliberate no-op there.
 - Mouse/trackpad support needs iPadOS 14 (`GCMouse`); on 13 the pointer still works as
   click-touches only. Pointer lock is advisory - iPadOS grants it only to a full-screen
@@ -694,5 +737,7 @@ Two MIT-licensed works are compiled into this port, with their headers intact - 
 - **Tedious Travel** by TheNewBob / Jedidia (copyright (c) 2018) - the origin of real travel
   (`MobileJourneyController.cs`, `MobileJourneyPilot.cs`, `MobileJourneyWindow.cs`), reworked
   for this port.
+
+Ten MIT-licensed mods by Cliffworms are built into `.dfmod` files and published as a mod pack - see `THIRD-PARTY.md`.
 
 Daggerfall itself is copyright Bethesda Softworks. No game assets are distributed here.

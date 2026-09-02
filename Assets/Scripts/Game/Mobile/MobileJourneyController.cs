@@ -471,8 +471,16 @@ namespace DaggerfallWorkshop.Game.Mobile
             PlayerGPS startGps = GameManager.Instance.PlayerGPS;
             if (startGps != null && startGps.HasCurrentLocation)
                 offeredPlaces.Add(startGps.CurrentMapID);
-            nightHandled = false;
-            wasNight = false;
+
+            // THE NIGHT DECISION SURVIVES A RESUME. This used to reset nightHandled here, so a
+            // player who closed the camp screen without sleeping (or slept an hour) resumed into
+            // the same night, was asked to camp again on the very next frame, and again, and
+            // again - measured on the Mac as three camps in under a second (journey probe run 6).
+            // Reported from the device as the journey "just getting stuck". The flag now clears
+            // only when night actually ends (CheckNightfall), never on resume.
+            bool nightNow = DaggerfallUnity.Instance.WorldTime != null && DaggerfallUnity.Instance.WorldTime.Now.IsNight;
+            nightHandled = NightFlagOnResume(nightNow, nightHandled);
+            wasNight = nightNow;
             travellingOnToInn = false;
 
             diseaseCount = GameManager.Instance.PlayerEffectManager.DiseaseCount;
@@ -760,6 +768,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             SampleSpeed();
             ApplySpawnSuppression(SpeedCautious);
             LogPixelPaths();
+
+            // Stand still while the town (or dungeon exterior) under the player is still being
+            // built, at 1x, and do not judge arrival or offer a stop until it exists.
+            bool holding = UpdateLocationHold();
             pilot.Update();
 
             // pilot.Update() may have arrived and stopped us mid-frame.
@@ -770,37 +782,111 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return;
             if (CheckDisease())
                 return;
-            if (CheckPassingPlace())
+            if (!holding && CheckPassingPlace())
                 return;
             if (CheckNightfall())
                 return;
             CheckEnemies();
         }
 
+        const float maxLocationHoldSeconds = 8f;
+        float locationHoldStarted = -1f;
+        bool holdCapWarned;
+
+        /// <summary>See ShouldHoldForLocation. Returns true while holding.</summary>
+        bool UpdateLocationHold()
+        {
+            PlayerGPS gps = GameManager.Instance.PlayerGPS;
+            StreamingWorld world = GameManager.Instance.StreamingWorld;
+            bool hasLocation = gps != null && gps.HasCurrentLocation;
+            bool built = world != null && world.CurrentPlayerLocationObject != null;
+
+            if (hasLocation && !built)
+            {
+                if (locationHoldStarted < 0f)
+                {
+                    locationHoldStarted = Time.unscaledTime;
+                    Debug.Log("[Journey] holding: '" + gps.CurrentLocation.Name + "' is not built yet");
+                }
+            }
+            else if (locationHoldStarted >= 0f)
+            {
+                Debug.Log(string.Format("[Journey] hold released after {0:F1}s", Time.unscaledTime - locationHoldStarted));
+                locationHoldStarted = -1f;
+            }
+
+            bool hold = ShouldHoldForLocation(hasLocation, built,
+                locationHoldStarted < 0f ? 0f : Time.unscaledTime - locationHoldStarted, maxLocationHoldSeconds);
+            if (hasLocation && !built && !hold && locationHoldStarted >= 0f && !holdCapWarned)
+            {
+                holdCapWarned = true;
+                Debug.LogWarning("[Journey] hold cap reached; travelling on through an unbuilt location");
+            }
+            if (built || !hasLocation)
+                holdCapWarned = false;
+
+            pilot.SetHold(hold);
+            if (hold && !Mathf.Approximately(Time.timeScale, 1f))
+                SetTimeScale(1);
+            return hold;
+        }
+
+        public enum VitalsAction { Continue, Stop, Camp }
+
         /// <summary>
-        /// Cautious travel stops rather than letting the player arrive dead. Reckless travel
-        /// accepts the risk, which is the whole point of choosing it.
+        /// Pure: what a journey does about the player's health and fatigue this frame.
+        ///
+        /// FATIGUE IS GUARDED IN EVERY MODE. The engine's own exhaustion handler
+        /// (PlayerEntity_OnExhausted) kills the player outright when fatigue reaches zero with
+        /// enemies nearby or in water, and otherwise drops them for an hour. At 20-30x a
+        /// journey reaches zero in seconds of real time, so reckless travel with no fatigue
+        /// check walked a healthy player straight into that death (device report: "healthy,
+        /// only stamina was low, I just died"). Nobody chose reckless to die of tiredness -
+        /// its stated trade is encounters and a straight line, so LOW HEALTH stays its own
+        /// risk, but low fatigue makes camp when resting is possible and stops when it is not.
         /// </summary>
+        public static VitalsAction DecideVitals(int healthPercent, int fatiguePercent, bool cautious,
+                                                bool enemiesNearby, bool swimming)
+        {
+            if (fatiguePercent <= defaultFatigueMinPercent)
+                return (enemiesNearby || swimming) ? VitalsAction.Stop : VitalsAction.Camp;
+            if (cautious && healthPercent <= defaultHealthMinPercent)
+                return VitalsAction.Stop;
+            return VitalsAction.Continue;
+        }
+
         bool CheckVitals()
         {
-            if (!SpeedCautious)
-                return false;
-
             PlayerEntity player = GameManager.Instance.PlayerEntity;
-
-            bool healthLow = player.MaxHealth > 0 &&
-                             player.CurrentHealth * 100 / player.MaxHealth <= defaultHealthMinPercent;
-            bool fatigueLow = player.MaxFatigue > 0 &&
-                              player.CurrentFatigue * 100 / player.MaxFatigue <= defaultFatigueMinPercent;
-
-            if (!healthLow && !fatigueLow)
+            if (player == null)
                 return false;
 
-            Stop(JourneyEnd.Interrupted);
-            DaggerfallUI.MessageBox(healthLow
-                ? "You are too badly hurt to continue your journey."
-                : "You are too exhausted to continue your journey.");
-            return true;
+            int healthPct = player.MaxHealth > 0 ? player.CurrentHealth * 100 / player.MaxHealth : 100;
+            int fatiguePct = player.MaxFatigue > 0 ? player.CurrentFatigue * 100 / player.MaxFatigue : 100;
+            bool fatigueLow = fatiguePct <= defaultFatigueMinPercent;
+            bool enemies = fatigueLow && GameManager.Instance.AreEnemiesNearby(resting: true);
+            bool swimming = fatigueLow && GameManager.Instance.PlayerEnterExit != null &&
+                            GameManager.Instance.PlayerEnterExit.IsPlayerSwimming;
+
+            switch (DecideVitals(healthPct, fatiguePct, SpeedCautious, enemies, swimming))
+            {
+                case VitalsAction.Camp:
+                    BeginCampNight("You are exhausted. You make camp to rest.");
+                    return true;
+
+                case VitalsAction.Stop:
+                    Stop(JourneyEnd.Interrupted);
+                    if (fatigueLow)
+                        DaggerfallUI.MessageBox(swimming
+                            ? "You are too exhausted to swim on. You stop before the water takes you."
+                            : "You are too exhausted to continue, and cannot rest with enemies nearby.");
+                    else
+                        DaggerfallUI.MessageBox("You are too badly hurt to continue your journey.");
+                    return true;
+
+                default:
+                    return false;
+            }
         }
 
         bool CheckDisease()
@@ -895,6 +981,25 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// where there is one and walks on to the next town where there is not - and camps if
         /// the purse is empty. Once per night.
         /// </summary>
+        /// <summary>Pure: nightHandled after a resume - kept while it is still the same night.</summary>
+        public static bool NightFlagOnResume(bool isNightNow, bool wasHandled)
+        {
+            return isNightNow && wasHandled;
+        }
+
+        /// <summary>
+        /// Pure: should the journey stand still because the location under the player has not
+        /// been built yet? StreamingWorld builds a town some seconds after the player's pixel
+        /// enters it - 7 s real at 8x on the Mac (probe runs 6-7), longer on an iPad - and in that
+        /// window the pilot used to walk on through the empty footprint, count arrival, and
+        /// offer "stop here?" for a town that was not there. Holding caps at maxHoldSeconds so a
+        /// location that never builds cannot pin the journey forever.
+        /// </summary>
+        public static bool ShouldHoldForLocation(bool hasLocation, bool locationBuilt, float heldSeconds, float maxHoldSeconds)
+        {
+            return hasLocation && !locationBuilt && heldSeconds < maxHoldSeconds;
+        }
+
         public static NightAction DecideNight(bool night, bool handledTonight, bool sleepModeInn,
                                               bool inSettlement, int gold, int innCost)
         {

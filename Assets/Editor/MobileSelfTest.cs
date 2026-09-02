@@ -29,6 +29,7 @@ using DaggerfallWorkshop.Utility.AssetInjection;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using UnityEngine;
@@ -79,11 +80,17 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestRelinquish();
             TestContentPathRemap();
             TestUserContentFolders();
+            TestMergeModFiles();
+            TestBundledModManifests();
+            TestBundledModLicences();
             TestWavDecoder();
             TestJourneyBearing();
             TestJourneyArrivalRect();
             TestJourneyCompressionClamp();
             TestJourneySpeedTiers();
+            TestJourneyVitals();
+            TestJourneyNightResume();
+            TestJourneyLocationHold();
             TestRouteRule();
             TestNightDecision();
             TestPassThroughGeometry();
@@ -208,6 +215,106 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             copy[0] = "clobbered";
             Check(MobileContentPath.UserFolderNames[0] != "clobbered",
                   "UserFolderNames returns a copy, not the backing array");
+        }
+
+        /// <summary>
+        /// On iOS two folders hold .dfmod files: the player's Documents/Mods and the shipped
+        /// StreamingAssets/Mods with the bundled MIT mods. The scanner merges them, player
+        /// first, and a shipped file whose name the player also has is dropped - so a player
+        /// who installs their own copy of a bundled mod gets theirs, not ours.
+        /// </summary>
+        static void TestMergeModFiles()
+        {
+            string p = "/Documents/Mods/", s = "/App/StreamingAssets/Mods/";
+
+            string[] r = ModManager.MergeModFiles(
+                new string[0], new[] { s + "JOTG.dfmod", s + "FixedDungeonExteriors.dfmod" });
+            Check(r.Length == 2 && r[0] == s + "JOTG.dfmod", "shipped-only: all shipped files, in order");
+
+            r = ModManager.MergeModFiles(new[] { p + "dream-sound.dfmod" }, new string[0]);
+            Check(r.Length == 1 && r[0] == p + "dream-sound.dfmod", "player-only: unchanged");
+
+            r = ModManager.MergeModFiles(new[] { p + "dream-sound.dfmod" }, new[] { s + "JOTG.dfmod" });
+            Check(r.Length == 2 && r[0] == p + "dream-sound.dfmod" && r[1] == s + "JOTG.dfmod",
+                  "disjoint: player first, then shipped");
+
+            r = ModManager.MergeModFiles(
+                new[] { p + "JOTG.dfmod" }, new[] { s + "JOTG.dfmod", s + "VariedWealthyHomes.dfmod" });
+            Check(r.Length == 2 && r[0] == p + "JOTG.dfmod" && r[1] == s + "VariedWealthyHomes.dfmod",
+                  "same file name in both: the player's copy is kept and the shipped one dropped");
+
+            r = ModManager.MergeModFiles(null, null);
+            Check(r != null && r.Length == 0, "null inputs give an empty list, not an exception");
+        }
+
+        /// <summary>
+        /// Every fetched mod manifest (Assets/Game/Mods/*, minus the IOSPilot fixture) must
+        /// parse, name no script, and reference only files that exist - the same rule the
+        /// fetch script applies, enforced from the editor so a stale or hand-edited fetch
+        /// cannot reach a build. Skips with a note when nothing has been fetched.
+        /// </summary>
+        static void TestBundledModManifests()
+        {
+            string[] manifests = MobileBuildSetup.BundledManifests();
+            if (manifests.Length == 0)
+            {
+                log.AppendLine("  SKIP  bundled mod manifests (none fetched - run tools/bundled-mods/fetch.py)");
+                return;
+            }
+            // The pin list (tools/bundled-mods/mods.json) is the source of truth for how many.
+            int pinned = 0;
+            try
+            {
+                string pins = File.ReadAllText("tools/bundled-mods/mods.json");
+                pinned = System.Text.RegularExpressions.Regex.Matches(pins, "\"repo\"\\s*:").Count;
+            }
+            catch (Exception) { }
+            Check(pinned > 0 && manifests.Length == pinned, "one fetched manifest per pinned mod",
+                  manifests.Length + " fetched, " + pinned + " pinned");
+            Check(!manifests.Any(m => m.Replace('\\', '/').Contains("/IOSPilot/")), "IOSPilot is never bundled");
+
+            int bad = 0;
+            var titles = new HashSet<string>();
+            foreach (string path in manifests)
+            {
+                ModInfo info = null;
+                bool ok = !ModManager._serializer.TryDeserialize(
+                    fsJsonParser.Parse(File.ReadAllText(path)), ref info).Failed && info != null;
+                if (!ok || string.IsNullOrWhiteSpace(info.ModTitle) || !titles.Add(info.ModTitle)) { bad++; continue; }
+                if (info.Files == null || info.Files.Count == 0) { bad++; continue; }
+                if (info.Files.Any(f => f.EndsWith(".cs") || f.EndsWith(".dll.bytes"))) { bad++; continue; }
+                if (info.Files.Any(f => !File.Exists(f))) { bad++; continue; }
+            }
+            Check(bad == 0, "every bundled manifest parses, has a unique title, no scripts, and all files present",
+                  bad + " bad");
+        }
+
+        /// <summary>
+        /// MIT requires the notice to travel with the copy, so each shipped bundle must have its
+        /// LICENSE beside it. Only meaningful after BuildBundledMods has run; skips otherwise.
+        /// </summary>
+        static void TestBundledModLicences()
+        {
+            string root = MobileBuildSetup.ShippedModsPath;
+            string[] bundles = Directory.Exists(root)
+                ? Directory.GetFiles(root, "*" + ModManager.MODEXTENSION, SearchOption.TopDirectoryOnly)
+                : new string[0];
+            if (bundles.Length == 0)
+            {
+                log.AppendLine("  SKIP  bundled mod licences (no bundles built yet - run MobileBuildSetup.BuildBundledMods)");
+                return;
+            }
+            int missing = 0;
+            foreach (string b in bundles)
+            {
+                string stem = Path.GetFileNameWithoutExtension(b);
+                string lic = Path.Combine(root, "Licenses", stem + "-LICENSE.txt");
+                if (!File.Exists(lic) || !File.ReadAllText(lic).TrimStart().StartsWith("MIT License"))
+                    missing++;
+            }
+            Check(missing == 0, "every shipped bundle has an MIT LICENSE beside it", missing + " missing");
+            Check(bundles.Length == MobileBuildSetup.BundledManifests().Length,
+                  "one bundle per fetched manifest", bundles.Length + " bundles");
         }
 
         /// <summary>
@@ -1157,6 +1264,72 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// binned most medium trips. Plus the reset that used to wipe the planned route is a
         /// code-shape bug the tests cannot see; it is documented in Resume().
         /// </summary>
+        /// <summary>
+        /// The engine kills a player outright when fatigue reaches zero with enemies nearby or
+        /// in water (PlayerEntity_OnExhausted -> SetHealth(0)); otherwise they collapse for an
+        /// hour. A journey runs at 20-30x, so reckless travel with no fatigue guard walked the
+        /// player into that death (device report: "healthy, only stamina low, just died").
+        /// The guard must apply in EVERY mode, and must camp when resting is possible.
+        /// </summary>
+        static void TestJourneyVitals()
+        {
+            var V = MobileJourneyController.VitalsAction.Continue;
+            Check(MobileJourneyController.DecideVitals(100, 100, cautious: false, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Continue, "vitals: healthy and rested -> continue");
+            Check(MobileJourneyController.DecideVitals(100, 15, cautious: false, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Camp, "vitals: RECKLESS + low fatigue -> camp (not walk on to collapse)");
+            Check(MobileJourneyController.DecideVitals(100, 15, cautious: true, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Camp, "vitals: cautious + low fatigue -> camp");
+            Check(MobileJourneyController.DecideVitals(100, 15, cautious: false, enemiesNearby: true, swimming: false)
+                  == MobileJourneyController.VitalsAction.Stop, "vitals: low fatigue + enemies nearby -> stop (cannot rest; engine would kill at 0)");
+            Check(MobileJourneyController.DecideVitals(100, 15, cautious: false, enemiesNearby: false, swimming: true)
+                  == MobileJourneyController.VitalsAction.Stop, "vitals: low fatigue in water -> stop (exhaustion in water is death)");
+            Check(MobileJourneyController.DecideVitals(3, 100, cautious: true, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Stop, "vitals: cautious + low health -> stop");
+            Check(MobileJourneyController.DecideVitals(3, 100, cautious: false, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Continue, "vitals: reckless accepts low health (its stated trade)");
+            Check(MobileJourneyController.DecideVitals(100, 20, cautious: false, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Camp, "vitals: exactly the threshold counts as low");
+            Check(MobileJourneyController.DecideVitals(100, 21, cautious: false, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Continue, "vitals: one above the threshold continues");
+        }
+
+        /// <summary>
+        /// Resuming after a camp used to reset the night flag, so a player who closed the rest
+        /// screen without sleeping was asked to camp again at once, forever (probe run 6: three
+        /// camps in under a second). The flag must survive a resume while it is still night.
+        /// </summary>
+        static void TestJourneyNightResume()
+        {
+            Check(MobileJourneyController.NightFlagOnResume(isNightNow: true, wasHandled: true),
+                  "night: resuming into the same night keeps 'handled' (no instant re-camp)");
+            Check(!MobileJourneyController.NightFlagOnResume(isNightNow: false, wasHandled: true),
+                  "night: resuming by day clears 'handled' for the coming night");
+            Check(!MobileJourneyController.NightFlagOnResume(isNightNow: true, wasHandled: false),
+                  "night: a fresh journey at night has not handled tonight yet");
+            Check(!MobileJourneyController.NightFlagOnResume(isNightNow: false, wasHandled: false),
+                  "night: day, nothing handled");
+        }
+
+        /// <summary>
+        /// A town is built some seconds after the player's pixel enters it. Until then the journey
+        /// must stand still: no arrival, no "stop here?" for a town that is not there, no walking
+        /// on through the empty footprint. Capped so a location that never builds cannot pin it.
+        /// </summary>
+        static void TestJourneyLocationHold()
+        {
+            Check(MobileJourneyController.ShouldHoldForLocation(hasLocation: true, locationBuilt: false, heldSeconds: 0f, maxHoldSeconds: 20f),
+                  "hold: in a location that is not built yet -> hold");
+            Check(!MobileJourneyController.ShouldHoldForLocation(hasLocation: true, locationBuilt: true, heldSeconds: 0f, maxHoldSeconds: 20f),
+                  "hold: location built -> travel on");
+            Check(!MobileJourneyController.ShouldHoldForLocation(hasLocation: false, locationBuilt: false, heldSeconds: 0f, maxHoldSeconds: 20f),
+                  "hold: wilderness never holds");
+            Check(!MobileJourneyController.ShouldHoldForLocation(hasLocation: true, locationBuilt: false, heldSeconds: 20f, maxHoldSeconds: 20f),
+                  "hold: the cap releases a location that never builds");
+            Check(MobileJourneyController.ShouldHoldForLocation(hasLocation: true, locationBuilt: false, heldSeconds: 19.9f, maxHoldSeconds: 20f),
+                  "hold: just under the cap still holds");
+        }
+
         static void TestRouteRule()
         {
             Check(MobileJourneyController.RouteWorthTaking(30, 10, 35), "route: a road with short off-road ends is taken");
